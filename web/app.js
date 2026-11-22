@@ -33,7 +33,9 @@ function App() {
   const [run,setRun] = useState(null);
   const [recent,setRecent] = useState(null);
   const [cinemaEnabled,setCinemaEnabled]=useState(null);
-  const [canEdit,setCanEdit]=useState(false);
+  const [me,setMe]=useState(null);
+  const [meError,setMeError]=useState('');
+  const [accessCheck,setAccessCheck]=useState(0);
   const [editing,setEditing]=useState(false);
   const [busy,setBusy] = useState(false);
   const [journal,setJournal] = useState(null);
@@ -50,11 +52,13 @@ function App() {
       init.body=JSON.stringify(data);
     }
     const res = await fetch('/api/'+path,init);
-    const result = await res.json();
+    const result = await res.json().catch(()=>null);
     if (!res.ok) {
-      if (res.status === 401 || (res.status === 403 && !path.startsWith('workflows'))) setAuthError(result.error);
-      throw new Error(result.error ?? 'Ошибка соединения');
+      const message=result?.error ?? 'Ошибка запроса';
+      if (res.status === 401 || (res.status === 403 && !path.startsWith('workflows'))) setAuthError(message);
+      throw new Error('HTTP '+res.status+' · '+message);
     }
+    if(result===null)throw new Error('Сервер вернул некорректный ответ.');
     return result;
   }
   useEffect(() => {
@@ -77,11 +81,21 @@ function App() {
   useEffect(() => {
     if (!token || run) return;
     let live=true;
-    Promise.all([api('runs'),api('cinema'),api('me')]).then(([rows,cinema,me])=>{
-      if(live){setRecent(rows);setCinemaEnabled(cinema.enabled);setCanEdit(me.canEdit);}
+    Promise.all([api('runs'),api('cinema')]).then(([rows,cinema])=>{
+      if(live){setRecent(rows);setCinemaEnabled(cinema.enabled);}
     }).catch(e=>{if(live)setError(e.message);});
     return ()=>{live=false;};
   },[token,run?.id]);
+  useEffect(()=>{
+    if(!token || run || editing)return;
+    let live=true;
+    setMe(null);setMeError('');
+    api('me').then(profile=>{
+      if(typeof profile.canEdit!=='boolean')throw new Error('В ответе отсутствует поле canEdit.');
+      if(live)setMe(profile);
+    }).catch(e=>{if(live)setMeError(e.message);});
+    return ()=>{live=false;};
+  },[token,run?.id,editing,accessCheck]);
   useEffect(() => {
     if (!run || run.status!=='ready') return;
     let live=true, timer;
@@ -149,7 +163,18 @@ function App() {
       <div className="feature-copy"><h1>Кино</h1><p>${cinemaEnabled===false?'Сервис поиска пока не подключён.':'Найти фильм и передать раздачу в uTorrent.'}</p>
       <button className="primary" disabled=${busy || !cinemaEnabled} onClick=${()=>open()}>Найти фильм</button></div>
       <img className="robot" src="/robot.jpg" alt="" /></section>
-    ${canEdit && h`<button className="editor-entry" onClick=${()=>setEditing(true)}><span aria-hidden="true">⑂</span><strong>Редактор workflow</strong><b aria-hidden="true">→</b></button>`}
+    ${me?.canEdit && h`<button className="editor-entry" onClick=${()=>setEditing(true)}><span aria-hidden="true">⑂</span><strong>Редактор workflow</strong><b aria-hidden="true">→</b></button>`}
+    <section className="recent" aria-label="Доступ к редактору"><h2>Доступ к редактору</h2>
+      ${me ? h`<p>Telegram ID на сервере · <code>${me.telegramUserId ?? 'сервер не вернул ID'}</code><br/>
+        <code>/api/me</code> · <code>${'canEdit: '+me.canEdit}</code></p>
+        ${!me.canEdit && h`<p>${me.reason==='admins_not_configured'
+          ? 'Список администраторов JARVIS_ADMIN_USER_IDS на сервере пуст.'
+          : me.reason==='user_not_admin' ? 'Этого Telegram ID нет в серверном списке JARVIS_ADMIN_USER_IDS.'
+          : 'Сервер не предоставил доступ к редактору.'}</p>`}`
+        : meError ? h`<p role="alert">Не удалось проверить права через /api/me. ${meError}</p>`
+        : h`<p role="status">Проверяем права через /api/me…</p>`}
+      <button className="secondary" disabled=${!me && !meError} onClick=${()=>setAccessCheck(n=>n+1)}>Проверить снова</button>
+    </section>
     <section className="recent"><h2>Последние запуски</h2>
     ${recent===null ? h`<p role="status">Загружаем историю…</p>` : !recent.length ? h`<p>Здесь появятся ваши поиски и квитанции.</p>` : recent.map(r=>h`
       <button key=${r.id} disabled=${busy} className="row" onClick=${()=>open(r.id)}>

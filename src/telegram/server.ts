@@ -57,7 +57,13 @@ export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAu
       }
       if (!path.startsWith('/api/')) throw new HttpError(404,'Страница не найдена');
       const actor = auth.actor(req.headers.authorization);
-      if (path === '/api/me' && req.method === 'GET') return json(res,200,{canEdit:admins.has(actor)});
+      if (path === '/api/me' && req.method === 'GET') {
+        const canEdit=admins.has(actor);
+        return json(res,200,{
+          telegramUserId:actor, canEdit,
+          ...(!canEdit && {reason:admins.size ? 'user_not_admin' : 'admins_not_configured'}),
+        });
+      }
       if (path === '/api/workflows' || path.startsWith('/api/workflows/')) {
         if (!admins.has(actor)) throw new HttpError(403,'Редактор доступен администраторам Jarvis.');
         if (path === '/api/workflows' && req.method === 'GET') return json(res,200,await editor.list());

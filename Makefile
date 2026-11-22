@@ -32,7 +32,7 @@ test-miniapp: dev-image
 .PHONY: test-deploy
 test-deploy:
 	@set -eu; project="jarvis-ubuntu-smoke-$$$$"; \
-	export JARVIS_BOT_TOKEN=1000:fixture JARVIS_ALLOWED_USER_IDS=42 JARVIS_DB_PASSWORD=fixture JARVIS_PORT=0; \
+	export JARVIS_BOT_TOKEN=1000:fixture JARVIS_ALLOWED_USER_IDS=42 JARVIS_ADMIN_USER_IDS='' JARVIS_DB_PASSWORD=fixture JARVIS_PORT=0; \
 	export JARVIS_PROXY_NETWORK=fixture-ingress; \
 	docker compose --env-file .env.example -p "$$project" -f compose.yaml -f compose.proxy.yaml config --quiet; \
 	stack() { docker compose --env-file .env.example -p "$$project" -f compose.yaml -f tests/miniapp/standalone.yaml "$$@"; }; \

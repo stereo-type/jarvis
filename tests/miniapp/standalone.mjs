@@ -11,6 +11,7 @@ entries.set('hash',createHmac('sha256',key).update(check).digest('hex'));
 const session=await fetch(origin+'/api/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData:entries.toString()})});
 assert.equal(session.status,200);
 const headers={authorization:'Bearer '+(await session.json()).token,'content-type':'application/json'};
+assert.deepEqual(await (await fetch(origin+'/api/me',{headers})).json(),{telegramUserId:'42',canEdit:false,reason:'admins_not_configured'});
 assert.deepEqual(await (await fetch(origin+'/api/cinema',{headers})).json(),{enabled:false});
 assert.equal((await fetch(origin+'/api/runs',{method:'POST',headers,body:'{}'})).status,503);
 assert.deepEqual(await (await fetch(origin+'/api/runs',{headers})).json(),[]);
