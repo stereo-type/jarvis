@@ -1,0 +1,5 @@
+services:
+  app:
+    image: jarvis-ubuntu-smoke:local
+  worker:
+    image: jarvis-ubuntu-smoke:local

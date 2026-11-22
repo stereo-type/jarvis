@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: jarvis_test
+      POSTGRES_PASSWORD: test
+    tmpfs: [/var/lib/postgresql/data]
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/filmobot.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "jarvis_test"]
+      interval: 1s
+      retries: 30
+  filmobot:
+    build: ${FILMOBOT_DIR:-../../../kinopoisk_bot}
+    image: jarvis-test-filmobot:local
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DB_HOST: db
+      DB_NAME: filmobot_test
+      DB_USER: postgres
+      DB_PASSWORD: test
+      FILMOBOT_SERVICE_TOKEN: fixture
+      PYTHONPATH: /app:/app/tests
+    volumes:
+      - ./filmobot.py:/fixture/serve.py:ro
+    command: ["python", "/fixture/serve.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://localhost:8080/fixture')"]
+      interval: 1s
+      retries: 30
+  tests:
+    image: jarvis-config-dev:local
+    environment:
+      DATABASE_URL: postgres://postgres:test@db/jarvis_test
+      FILMOBOT_BASE_URL: http://filmobot:8080
+      FILMOBOT_SERVICE_TOKEN: fixture
+    depends_on:
+      filmobot: { condition: service_healthy }
+    command: ["node", "--test", "tests/runner/integration.test.ts"]
+networks:
+  default:
+    internal: true

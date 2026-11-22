@@ -1,0 +1,46 @@
+services:
+  app:
+    build: ../..
+    image: jarvis-miniapp-test:local
+    environment:
+      PGHOST: db
+      PGDATABASE: jarvis_test
+      PGUSER: postgres
+      PGPASSWORD: test
+      JARVIS_BOT_TOKEN: 1000:fixture
+      JARVIS_ALLOWED_USER_IDS: 42,43
+      JARVIS_CINEMA_ENABLED: 'true'
+    depends_on:
+      db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  worker:
+    image: jarvis-miniapp-test:local
+    pull_policy: never
+    command: ["node","src/run.ts","worker"]
+    environment:
+      PGHOST: db
+      PGDATABASE: jarvis_test
+      PGUSER: postgres
+      PGPASSWORD: test
+      JARVIS_HEARTBEAT_FILE: /tmp/jarvis-worker
+      FILMOBOT_BASE_URL: http://filmobot:8080
+      FILMOBOT_SERVICE_TOKEN: fixture
+    depends_on:
+      app: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD","node","-e","process.exit(Date.now()-require('node:fs').statSync('/tmp/jarvis-worker').mtimeMs<90000?0:1)"]
+      interval: 1s
+      retries: 30
+  tests:
+    build:
+      context: ../..
+      dockerfile: tests/miniapp/Dockerfile.browser
+    image: jarvis-browser-test:local
+    depends_on:
+      worker: { condition: service_healthy }
+      app: { condition: service_healthy }
+    command: ["node","--test","tests/miniapp/browser.test.ts"]

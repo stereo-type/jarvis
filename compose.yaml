@@ -1,0 +1,53 @@
+x-database-env: &db-env
+  PGHOST: db
+  PGDATABASE: jarvis
+  PGUSER: jarvis
+  PGPASSWORD: ${JARVIS_DB_PASSWORD:?Set JARVIS_DB_PASSWORD}
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: jarvis
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: ${JARVIS_DB_PASSWORD:?Set JARVIS_DB_PASSWORD}
+    volumes: [jarvis_db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD","pg_isready","-U","jarvis","-d","jarvis"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  app:
+    build: .
+    image: jarvis-app:local
+    environment:
+      <<: *db-env
+      JARVIS_BOT_TOKEN: ${JARVIS_BOT_TOKEN:?Set JARVIS_BOT_TOKEN}
+      JARVIS_ALLOWED_USER_IDS: ${JARVIS_ALLOWED_USER_IDS:?Set JARVIS_ALLOWED_USER_IDS}
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["127.0.0.1:${JARVIS_PORT:-8080}:8080"]
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+    restart: unless-stopped
+  worker:
+    image: jarvis-app:local
+    pull_policy: never
+    command: ["node","src/run.ts","worker"]
+    environment:
+      <<: *db-env
+      JARVIS_HEARTBEAT_FILE: /tmp/jarvis-worker
+    healthcheck:
+      test: ["CMD","node","-e","process.exit(Date.now()-require('node:fs').statSync('/tmp/jarvis-worker').mtimeMs<90000?0:1)"]
+      interval: 15s
+      timeout: 4s
+      retries: 2
+    depends_on:
+      app: { condition: service_healthy }
+    stop_grace_period: 70s
+    restart: unless-stopped
+volumes:
+  jarvis_db:

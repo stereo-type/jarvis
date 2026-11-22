@@ -7,4 +7,6 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY examples ./examples
 COPY tests ./tests
+COPY web ./web
+COPY jarvis-robot-640x360.jpg ./
 USER node

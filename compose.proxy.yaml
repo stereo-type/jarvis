@@ -1,0 +1,10 @@
+services:
+  app:
+    networks:
+      default: {}
+      ingress:
+        aliases: [jarvis-app]
+networks:
+  ingress:
+    external: true
+    name: ${JARVIS_PROXY_NETWORK:?Set JARVIS_PROXY_NETWORK}

@@ -16,3 +16,26 @@ test: dev-image
 
 validate: dev-image
 	docker run --rm --network none -v "$(CURDIR):/project:ro" -w /project $(DEV_IMAGE) node /app/src/validate.ts "$(CONNECTION)" "$(WORKFLOW)"
+
+.PHONY: test-runner
+test-runner: dev-image
+	@set -eu; project="jarvis-runner-$$$$"; \
+	trap 'docker compose -p "$$project" -f tests/runner/compose.yaml down' EXIT; \
+	docker compose -p "$$project" -f tests/runner/compose.yaml up --build --abort-on-container-exit --exit-code-from tests tests
+
+.PHONY: test-miniapp
+test-miniapp: dev-image
+	@set -eu; project="jarvis-miniapp-$$$$"; \
+	trap 'docker compose -p "$$project" -f tests/runner/compose.yaml -f tests/miniapp/compose.yaml down' EXIT; \
+	docker compose -p "$$project" -f tests/runner/compose.yaml -f tests/miniapp/compose.yaml up --build --abort-on-container-exit --exit-code-from tests tests
+
+.PHONY: test-deploy
+test-deploy:
+	@set -eu; project="jarvis-ubuntu-smoke-$$$$"; \
+	export JARVIS_BOT_TOKEN=1000:fixture JARVIS_ALLOWED_USER_IDS=42 JARVIS_DB_PASSWORD=fixture JARVIS_PORT=0; \
+	export JARVIS_PROXY_NETWORK=fixture-ingress; \
+	docker compose --env-file .env.example -p "$$project" -f compose.yaml -f compose.proxy.yaml config --quiet; \
+	stack() { docker compose --env-file .env.example -p "$$project" -f compose.yaml -f tests/miniapp/standalone.yaml "$$@"; }; \
+	trap 'stack down -v' EXIT; \
+	stack up -d --build --wait --wait-timeout 90; \
+	stack exec -T app node --input-type=module < tests/miniapp/standalone.mjs

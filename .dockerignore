@@ -9,3 +9,7 @@
 !examples/**
 !tests/
 !tests/**
+!Dockerfile
+!web/
+!web/**
+!jarvis-robot-640x360.jpg
