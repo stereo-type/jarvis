@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "jarvis.connection/v1",
+  "id": "filmobot",
+  "title": "Filmobot",
+  "apiMajor": 1,
+  "baseUrlEnv": "FILMOBOT_BASE_URL",
+  "credential": { "type": "bearer", "tokenEnv": "FILMOBOT_SERVICE_TOKEN" },
+  "requiredHeaders": ["X-Jarvis-User-Id", "X-Request-Id"],
+  "contractFile": "./filmobot.openapi.json",
+  "operations": ["searchReleases", "enqueueDownload"]
+}

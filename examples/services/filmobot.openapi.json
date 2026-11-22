@@ -1,0 +1,122 @@
+{
+  "openapi": "3.1.1",
+  "info": { "title": "Filmobot для Jarvis", "version": "1.0.0" },
+  "security": [{ "serviceToken": [] }],
+  "paths": {
+    "/v1/releases": {
+      "get": {
+        "operationId": "searchReleases",
+        "summary": "Найти раздачи",
+        "parameters": [
+          { "$ref": "#/components/parameters/Actor" },
+          { "$ref": "#/components/parameters/RequestId" },
+          { "in": "query", "name": "query", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 200 } },
+          { "in": "query", "name": "limit", "schema": { "type": "integer", "minimum": 1, "maximum": 5, "default": 5 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Снимок результатов для пользователя. При пустой выдаче releases равен [].",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchResult" } } }
+          },
+          "default": { "$ref": "#/components/responses/Failure" }
+        }
+      }
+    },
+    "/v1/downloads": {
+      "post": {
+        "operationId": "enqueueDownload",
+        "summary": "Передать раздачу в watch-папку uTorrent",
+        "x-jarvis-idempotency": "required",
+        "parameters": [
+          { "$ref": "#/components/parameters/Actor" },
+          { "$ref": "#/components/parameters/RequestId" },
+          { "in": "header", "name": "Idempotency-Key", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object", "additionalProperties": false, "required": ["searchId", "releaseId"],
+                "properties": {
+                  "searchId": { "$ref": "#/components/schemas/SearchId" },
+                  "releaseId": { "$ref": "#/components/schemas/ReleaseId" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Файл передан. Повтор завершённой команды возвращает ту же квитанцию и статус.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Submission" } } }
+          },
+          "404": { "$ref": "#/components/responses/Failure" },
+          "409": { "$ref": "#/components/responses/Failure" },
+          "410": { "$ref": "#/components/responses/Failure" },
+          "422": { "$ref": "#/components/responses/Failure" },
+          "default": { "$ref": "#/components/responses/Failure" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "serviceToken": { "type": "http", "scheme": "bearer" } },
+    "parameters": {
+      "Actor": {
+        "in": "header", "name": "X-Jarvis-User-Id", "required": true,
+        "description": "Числовой Telegram user ID, установленный Jarvis после авторизации.",
+        "schema": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+      },
+      "RequestId": {
+        "in": "header", "name": "X-Request-Id", "required": true,
+        "schema": { "type": "string", "format": "uuid" }
+      }
+    },
+    "responses": {
+      "Failure": {
+        "description": "Код ошибки определяет ветку графа. Retry-After в секундах возможен для временного отказа.",
+        "headers": { "Retry-After": { "schema": { "type": "integer", "minimum": 1 } } },
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Failure" } } }
+      }
+    },
+    "schemas": {
+      "SearchId": { "type": "string", "format": "uuid" },
+      "ReleaseId": { "type": "string", "pattern": "^rutor:[0-9]+$" },
+      "SearchResult": {
+        "type": "object", "required": ["searchId", "expiresAt", "releases"],
+        "properties": {
+          "searchId": { "$ref": "#/components/schemas/SearchId" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "releases": { "type": "array", "maxItems": 5, "items": { "$ref": "#/components/schemas/Release" } }
+        }
+      },
+      "Release": {
+        "type": "object", "required": ["releaseId", "title", "size", "seeds", "leeches"],
+        "properties": {
+          "releaseId": { "$ref": "#/components/schemas/ReleaseId" },
+          "title": { "type": "string" },
+          "size": { "type": "string", "description": "Размер для показа, например 2.9 GB." },
+          "seeds": { "type": "integer", "minimum": 0 },
+          "leeches": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "Submission": {
+        "type": "object", "required": ["submissionId", "releaseId", "status"],
+        "properties": {
+          "submissionId": { "type": "string", "format": "uuid" },
+          "releaseId": { "$ref": "#/components/schemas/ReleaseId" },
+          "status": { "type": "string", "const": "submitted" }
+        }
+      },
+      "Failure": {
+        "type": "object", "required": ["code", "message", "requestId"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+          "message": { "type": "string" },
+          "requestId": { "type": "string", "format": "uuid" }
+        }
+      }
+    }
+  }
+}

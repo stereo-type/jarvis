@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "jarvis.workflow/v1",
+  "id": "cinema.search-and-download",
+  "title": "Найти и скачать фильм",
+  "revision": 1,
+  "entry": "query",
+  "nodes": [
+    {
+      "id": "query", "type": "ui.form", "position": [0, 0],
+      "title": "Какой фильм ищем?",
+      "fields": [
+        { "key": "query", "label": "Название или название и год", "type": "string", "trim": true, "minLength": 1, "maxLength": 200 }
+      ],
+      "on": { "submit": "search" }
+    },
+    {
+      "id": "search", "type": "service.call", "position": [260, 0],
+      "service": "filmobot", "apiMajor": 1, "operationId": "searchReleases",
+      "args": { "query": { "$ref": "query.query" }, "limit": 5 },
+      "on": { "success": "found", "error": "failure" }
+    },
+    {
+      "id": "found", "type": "flow.hasItems", "position": [520, 0],
+      "items": { "$ref": "search.releases" },
+      "on": { "yes": "choose", "no": "empty" }
+    },
+    {
+      "id": "choose", "type": "ui.choice", "position": [780, 0],
+      "title": "Выбери раздачу",
+      "items": { "$ref": "search.releases" },
+      "valueField": "releaseId", "labelField": "title", "detailFields": ["size", "seeds"],
+      "expiresAt": { "$ref": "search.expiresAt" },
+      "on": { "select": "enqueue", "cancel": "cancelled", "expired": "expired" }
+    },
+    {
+      "id": "enqueue", "type": "service.call", "position": [1040, 0],
+      "service": "filmobot", "apiMajor": 1, "operationId": "enqueueDownload",
+      "requireIdempotency": true,
+      "args": { "searchId": { "$ref": "search.searchId" }, "releaseId": { "$ref": "choose.value" } },
+      "on": { "success": "submitted", "error.SELECTION_EXPIRED": "expired", "error.HANDOFF_UNCERTAIN": "uncertain", "error": "failure" }
+    },
+    {
+      "id": "submitted", "type": "ui.result", "position": [1300, 0],
+      "title": "Файл .torrent передан в watch-папку uTorrent", "receipt": { "$ref": "enqueue.submissionId" }
+    },
+    { "id": "empty", "type": "ui.result", "position": [780, 200], "title": "Ничего не найдено. Попробуй другое название или добавь год." },
+    { "id": "cancelled", "type": "ui.result", "position": [1040, 200], "title": "Выбор отменён" },
+    { "id": "expired", "type": "ui.result", "position": [1040, 400], "title": "Время выбора истекло. Запусти новый поиск." },
+    { "id": "uncertain", "type": "ui.result", "position": [1300, 200], "title": "Результат передачи неизвестен. Проверь очередь uTorrent." },
+    { "id": "failure", "type": "ui.result", "position": [1300, 400], "title": "Операция завершилась ошибкой. Подробности в журнале запуска." }
+  ]
+}
