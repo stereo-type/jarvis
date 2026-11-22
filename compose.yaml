@@ -24,6 +24,7 @@ services:
       <<: *db-env
       JARVIS_BOT_TOKEN: ${JARVIS_BOT_TOKEN:?Set JARVIS_BOT_TOKEN}
       JARVIS_ALLOWED_USER_IDS: ${JARVIS_ALLOWED_USER_IDS:?Set JARVIS_ALLOWED_USER_IDS}
+      JARVIS_ADMIN_USER_IDS: ${JARVIS_ADMIN_USER_IDS:-}
     depends_on:
       db: { condition: service_healthy }
     ports: ["127.0.0.1:${JARVIS_PORT:-8080}:8080"]

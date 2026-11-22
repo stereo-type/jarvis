@@ -1,0 +1,27 @@
+services:
+  app:
+    image: jarvis-editor-app:local
+  worker:
+    image: jarvis-editor-app:local
+  tests:
+    volumes:
+      - type: bind
+        source: ${QUEUE_EXPORT:-./tests/fixtures/queue_v9.json}
+        target: /input/queue_v9.json
+        read_only: true
+        bind: { create_host_path: false }
+    build:
+      context: .
+      dockerfile: tests/miniapp/Dockerfile.browser
+    environment:
+      PGHOST: db
+      PGDATABASE: jarvis
+      PGUSER: jarvis
+      PGPASSWORD: fixture
+    command: ["node","--test","--test-concurrency=1","tests/miniapp/editor.test.ts","tests/miniapp/n8n.test.ts"]
+    depends_on:
+      app: { condition: service_healthy }
+      worker: { condition: service_healthy }
+networks:
+  default:
+    internal: true

@@ -60,7 +60,7 @@ export class Runner {
     const id = randomUUID();
     const result = await this.pool.query(`INSERT INTO jarvis_runs(id,actor,workflow,revision,step,status,command)
       SELECT $1,$2,workflow,revision,snapshot->'graph'->>'entry','waiting',$3 FROM jarvis_definitions
-      WHERE workflow=$4 ORDER BY revision DESC LIMIT 1`, [id, actor, randomUUID(), workflow]);
+      WHERE workflow=$4 AND snapshot->'graph'->>'schemaVersion'='jarvis.workflow/v1' ORDER BY revision DESC LIMIT 1`, [id, actor, randomUUID(), workflow]);
     if (!result.rowCount) throw new Error('Workflow не опубликован');
     return id;
   }

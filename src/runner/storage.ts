@@ -10,6 +10,10 @@ export async function migrate(pool: Pool) {
         workflow text NOT NULL, revision integer NOT NULL, snapshot jsonb NOT NULL,
         PRIMARY KEY (workflow, revision)
       );
+      CREATE TABLE IF NOT EXISTS jarvis_workflow_drafts (
+        workflow text PRIMARY KEY, base_revision integer NOT NULL, version uuid NOT NULL, graph jsonb NOT NULL,
+        FOREIGN KEY (workflow, base_revision) REFERENCES jarvis_definitions(workflow, revision)
+      );
       CREATE TABLE IF NOT EXISTS jarvis_runs (
         id uuid PRIMARY KEY, actor text NOT NULL, workflow text NOT NULL, revision integer NOT NULL,
         step text NOT NULL, status text NOT NULL CHECK (status IN ('waiting','ready','done')),
@@ -17,6 +21,17 @@ export async function migrate(pool: Pool) {
         lease uuid, due timestamptz NOT NULL DEFAULT now(), expires timestamptz,
         FOREIGN KEY (workflow, revision) REFERENCES jarvis_definitions
       );
+      ALTER TABLE jarvis_workflow_drafts ALTER COLUMN base_revision DROP NOT NULL;
+      CREATE TABLE IF NOT EXISTS jarvis_queue_runs (
+        id uuid PRIMARY KEY, actor text NOT NULL, workflow text NOT NULL, revision integer NOT NULL,
+        request_id uuid NOT NULL, mode text NOT NULL CHECK(mode IN ('test','live')),
+        status text NOT NULL CHECK(status IN ('queued','running','done','failed')),
+        created timestamptz NOT NULL DEFAULT now(), heartbeat timestamptz, result jsonb,
+        FOREIGN KEY(workflow,revision) REFERENCES jarvis_definitions,
+        UNIQUE(actor,request_id)
+      );
+      CREATE INDEX IF NOT EXISTS jarvis_queue_pending ON jarvis_queue_runs(created) WHERE status='queued';
+      CREATE UNIQUE INDEX IF NOT EXISTS jarvis_queue_live ON jarvis_queue_runs(mode) WHERE mode='live' AND status IN ('queued','running');
       CREATE INDEX IF NOT EXISTS jarvis_work ON jarvis_runs(due) WHERE status='ready';
       ALTER TABLE jarvis_runs ADD COLUMN IF NOT EXISTS uncertain boolean NOT NULL DEFAULT false;
       ALTER TABLE jarvis_runs ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();

@@ -39,3 +39,13 @@ test-deploy:
 	trap 'stack down -v' EXIT; \
 	stack up -d --build --wait --wait-timeout 90; \
 	stack exec -T app node --input-type=module < tests/miniapp/standalone.mjs
+
+.PHONY: test-editor
+test-editor: dev-image
+	@set -eu; project="jarvis-editor-$$$$"; \
+	export JARVIS_BOT_TOKEN=1000:fixture JARVIS_ALLOWED_USER_IDS=42,43 JARVIS_ADMIN_USER_IDS=42 JARVIS_DB_PASSWORD=fixture JARVIS_PORT=0; \
+	stack() { docker compose --env-file .env.example -p "$$project" -f compose.yaml -f tests/miniapp/editor.yaml "$$@"; }; \
+	trap 'stack down -v' EXIT; \
+	stack up --build --abort-on-container-exit --exit-code-from tests tests
+
+include Makefile.n8n

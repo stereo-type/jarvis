@@ -3,11 +3,15 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { InvalidAction, Runner, RunNotFound } from '../runner/engine.ts';
 import { HttpError, telegramAuth } from './auth.ts';
+import type { WorkflowEditor } from '../editor.ts';
+import type { QueueJobs } from '../n8n/jobs.ts';
 
 const cinema = 'cinema.search-and-download';
 const assets = new Map<string, [string, string]>([
   ['/', ['web/index.html','text/html; charset=utf-8']],
   ['/app.js', ['web/app.js','text/javascript']],
+  ['/editor.js', ['web/editor.js','text/javascript']],
+  ['/editor.css', ['web/editor.css','text/css']],
   ['/style.css', ['web/style.css','text/css']],
   ['/robot.jpg', ['jarvis-robot-640x360.jpg','image/jpeg']],
   ['/react.js', ['node_modules/react/umd/react.production.min.js','text/javascript']],
@@ -15,13 +19,13 @@ const assets = new Map<string, [string, string]>([
   ['/htm.js', ['node_modules/htm/dist/htm.module.js','text/javascript']],
 ]);
 
-async function body(req: IncomingMessage) {
+async function body(req: IncomingMessage, limit = 16384) {
   if (req.headers['content-type']?.split(';')[0]?.trim() !== 'application/json') throw new HttpError(415,'Ожидается JSON');
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of req) {
     bytes += chunk.length;
-    if (bytes > 16384) throw new HttpError(413,'Слишком большой запрос');
+    if (bytes > limit) throw new HttpError(413,'Слишком большой запрос');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown; }
@@ -31,7 +35,7 @@ function json(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(data));
 }
 
-export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAuth>, healthy: () => Promise<unknown>, cinemaEnabled: boolean) {
+export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAuth>, healthy: () => Promise<unknown>, cinemaEnabled: boolean, editor: WorkflowEditor, admins: ReadonlySet<string>, jobs:QueueJobs) {
   const action = z.object({ step:z.string().max(100), event:z.enum(['submit','select','cancel']), data:z.record(z.unknown()).default({}) }).strict();
   return createServer(async (req,res) => {
     res.setHeader('Cache-Control','no-store');
@@ -53,6 +57,29 @@ export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAu
       }
       if (!path.startsWith('/api/')) throw new HttpError(404,'Страница не найдена');
       const actor = auth.actor(req.headers.authorization);
+      if (path === '/api/me' && req.method === 'GET') return json(res,200,{canEdit:admins.has(actor)});
+      if (path === '/api/workflows' || path.startsWith('/api/workflows/')) {
+        if (!admins.has(actor)) throw new HttpError(403,'Редактор доступен администраторам Jarvis.');
+        if (path === '/api/workflows' && req.method === 'GET') return json(res,200,await editor.list());
+        if (path === '/api/workflows/import-n8n' && req.method === 'POST') {
+          return json(res,200,{...await editor.import(await body(req,524288)),liveEnabled:jobs.liveEnabled});
+        }
+        const runPath=/^\/api\/workflows\/(n8n\.[\w-]+)\/runs\/([\w-]+)$/.exec(path);
+        if(runPath && req.method==='GET' && z.string().uuid().safeParse(runPath[2]).success) {
+          return json(res,200,await jobs.view(runPath[1]!,actor,runPath[2]!));
+        }
+        const match = /^\/api\/workflows\/([A-Za-z][\w.-]*)(?:\/(draft|publish|discard|run))?$/.exec(path);
+        if (match) {
+          const workflow = match[1]!;
+          const op = match[2];
+          if (!op && req.method === 'GET') return json(res,200,{...await editor.read(workflow),liveEnabled:jobs.liveEnabled});
+          if(op==='run' && req.method==='POST')return json(res,202,await jobs.start(workflow,actor,await body(req)));
+          if ((op === 'draft' || op === 'publish' || op === 'discard') && req.method === 'POST') {
+            return json(res,200,{...await editor.write(workflow,op,await body(req,op === 'draft' ? 524288 : 16384)),liveEnabled:jobs.liveEnabled});
+          }
+        }
+        throw new HttpError(404,'Маршрут редактора не найден.');
+      }
       if (path === '/api/cinema' && req.method === 'GET') return json(res,200,{enabled:cinemaEnabled});
       if (path === '/api/runs') {
         if (req.method === 'GET') return json(res,200,await runner.recent(actor,cinema));

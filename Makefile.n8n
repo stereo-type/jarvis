@@ -1,0 +1,15 @@
+.PHONY: check-n8n-access
+check-n8n-access: export QUEUE_EXPORT := $(QUEUE_EXPORT)
+check-n8n-access: export N8N_CREDENTIALS := $(N8N_CREDENTIALS)
+check-n8n-access: export ASSISTANT_ENV := $(ASSISTANT_ENV)
+check-n8n-access: dev-image
+	@set -eu; \
+	  for file in "$$QUEUE_EXPORT" "$$N8N_CREDENTIALS" "$$ASSISTANT_ENV"; do \
+	    test -f "$$file" && test -r "$$file" || { echo "Specify readable files via QUEUE_EXPORT, N8N_CREDENTIALS and ASSISTANT_ENV" >&2; exit 2; }; \
+	  done; \
+	  grep -E '^[[:space:]]*(export[[:space:]]+)?(GOOGLE_SHEET_ID|MAX_PARALLEL_TASKS|STALL_TIMEOUT_HOURS)[[:space:]]*=' -- "$$ASSISTANT_ENV" | \
+	  docker run --rm -i --read-only --cap-drop=ALL --security-opt=no-new-privileges \
+	    --user "$$(id -u):$$(id -g)" \
+	    --mount "type=bind,src=$$(realpath -- "$$QUEUE_EXPORT"),dst=/input/queue.json,readonly" \
+	    --mount "type=bind,src=$$(realpath -- "$$N8N_CREDENTIALS"),dst=/input/credentials.json,readonly" \
+	    $(DEV_IMAGE) node src/n8n/check-access.ts /input/queue.json /input/credentials.json

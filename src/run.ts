@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { Runner } from './runner/engine.ts';
 import { migrate } from './runner/storage.ts';
+import { QueueJobs } from './n8n/jobs.ts';
 
 async function main(args: string[]) {
   if (!process.env.DATABASE_URL && !process.env.PGHOST) throw new Error('Укажите подключение PostgreSQL');
@@ -24,9 +25,17 @@ async function main(args: string[]) {
         let stopping = false;
         let lastHeartbeat = 0;
         const heartbeat = process.env.JARVIS_HEARTBEAT_FILE;
-        const stop = () => { stopping = true; };
+        const controller=new AbortController();
+        const stop = () => { stopping = true; controller.abort(); };
         process.once('SIGTERM', stop);
         process.once('SIGINT', stop);
+        const jobs=new QueueJobs(pool,process.env.JARVIS_N8N_LIVE_ENABLED==='true');
+        const queueLoop=(async()=>{
+          while(!stopping) {
+            try{if(!await jobs.tick(controller.signal))await sleep(1000);}
+            catch{console.error('Сбой worker очереди n8n.');await sleep(1000);}
+          }
+        })();
         while (!stopping) {
           try {
             const worked = await runner.tick();
@@ -40,6 +49,7 @@ async function main(args: string[]) {
             await sleep(1000);
           }
         }
+        await queueLoop;
         return;
       }
     }

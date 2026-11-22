@@ -1,0 +1,28 @@
+services:
+  app:
+    environment:
+      JARVIS_N8N_LIVE_ENABLED: "true"
+  worker:
+    environment:
+      JARVIS_N8N_LIVE_ENABLED: "true"
+      JARVIS_N8N_CREDENTIALS_FILE: /run/secrets/n8n_credentials
+      JARVIS_N8N_CODER_ORIGIN: ${JARVIS_N8N_CODER_ORIGIN:-http://assistant-coder:3000}
+      JARVIS_N8N_MANAGER_ORIGIN: ${JARVIS_N8N_MANAGER_ORIGIN:-http://assistant-n8n:5678}
+      JARVIS_N8N_GIT_ORIGINS: ${JARVIS_N8N_GIT_ORIGINS:-}
+      GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID:?Set GOOGLE_SHEET_ID}
+      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID:?Set ADMIN_CHAT_ID}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:?Set GITHUB_TOKEN}
+      GITHUB_OWNER: ${GITHUB_OWNER:-}
+      PROJECT_REPO: ${PROJECT_REPO:-}
+      MAX_PARALLEL_TASKS: ${MAX_PARALLEL_TASKS:-2}
+      STALL_TIMEOUT_HOURS: ${STALL_TIMEOUT_HOURS:-8}
+      MAX_STALL_RETRIES: ${MAX_STALL_RETRIES:-3}
+    secrets: [n8n_credentials]
+    networks: [default, assistant]
+secrets:
+  n8n_credentials:
+    file: ${JARVIS_N8N_HOST_CREDENTIALS_FILE:?Set the absolute path to the n8n credential export}
+networks:
+  assistant:
+    external: true
+    name: ${JARVIS_ASSISTANT_NETWORK:?Set the existing assistant network name}
