@@ -49,3 +49,9 @@ test-editor: dev-image
 	stack up --build --abort-on-container-exit --exit-code-from tests tests
 
 include Makefile.n8n
+
+.PHONY: test-cinema-telegram
+test-cinema-telegram: dev-image
+	@set -eu; project="jarvis-cinema-$$$$"; \
+	trap 'docker compose -p "$$project" -f tests/cinema/compose.yaml down -v' EXIT; \
+	docker compose -p "$$project" -f tests/cinema/compose.yaml up --build --abort-on-container-exit --exit-code-from tests tests

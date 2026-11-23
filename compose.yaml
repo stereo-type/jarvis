@@ -25,6 +25,11 @@ services:
       JARVIS_BOT_TOKEN: ${JARVIS_BOT_TOKEN:?Set JARVIS_BOT_TOKEN}
       JARVIS_ALLOWED_USER_IDS: ${JARVIS_ALLOWED_USER_IDS:?Set JARVIS_ALLOWED_USER_IDS}
       JARVIS_ADMIN_USER_IDS: ${JARVIS_ADMIN_USER_IDS:-}
+      JARVIS_CINEMA_ENABLED: ${JARVIS_CINEMA_ENABLED:-false}
+      JARVIS_CINEMA_TRANSPORT: telegram
+      JARVIS_FILMOBOT_ID: ${JARVIS_FILMOBOT_ID:-}
+      JARVIS_CINEMA_WEBHOOK_SECRET: ${JARVIS_CINEMA_WEBHOOK_SECRET:-}
+      JARVIS_PUBLIC_URL: ${JARVIS_PUBLIC_URL:-}
     depends_on:
       db: { condition: service_healthy }
     ports: ["127.0.0.1:${JARVIS_PORT:-8080}:8080"]
@@ -41,6 +46,10 @@ services:
     environment:
       <<: *db-env
       JARVIS_HEARTBEAT_FILE: /tmp/jarvis-worker
+      JARVIS_CINEMA_TRANSPORT: telegram
+      JARVIS_FILMOBOT_ID: ${JARVIS_FILMOBOT_ID:-}
+      JARVIS_BOT_TOKEN: ${JARVIS_BOT_TOKEN:?Set JARVIS_BOT_TOKEN}
+      JARVIS_FILMOBOT_USERNAME: ${JARVIS_FILMOBOT_USERNAME:-}
     healthcheck:
       test: ["CMD","node","-e","process.exit(Date.now()-require('node:fs').statSync('/tmp/jarvis-worker').mtimeMs<90000?0:1)"]
       interval: 15s

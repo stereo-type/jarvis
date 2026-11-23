@@ -4,6 +4,7 @@ import { compileCatalog, readCatalogFiles } from '../config/catalog.ts';
 import { readJson } from '../config/schema.ts';
 import { compileWorkflow, type WorkflowNode } from '../config/workflow.ts';
 import { callService } from './service-call.ts';
+import { CinemaBridge } from '../cinema/bridge.ts';
 
 type Snapshot = { graph: unknown; config: unknown; api: unknown };
 type Run = {
@@ -39,10 +40,12 @@ const joinedRun = 'SELECT r.*, d.snapshot FROM jarvis_runs r JOIN jarvis_definit
 export class Runner {
   private pool: Pool;
   private env: NodeJS.ProcessEnv;
+  readonly cinema: CinemaBridge;
 
-  constructor(pool: Pool, env = process.env) {
+  constructor(pool: Pool, env = process.env, cinema = new CinemaBridge(pool,env)) {
     this.pool = pool;
     this.env = env;
+    this.cinema = cinema;
   }
 
   async publish(connection: string, workflow: string) {
@@ -99,7 +102,7 @@ export class Runner {
     return result.rows;
   }
 
-  private async advance(run: Run, def: Definition, dest: string, output?: unknown, requireValidChoice = false) {
+  private async advance(run: Run, def: Definition, dest: string, output?: unknown, requireValidChoice = false, keepCommand = false) {
     const outputs = output === undefined ? run.outputs : { ...run.outputs, [run.step]: output };
     const next = def.graph.nodes.get(dest)!;
     const status = next.type === 'ui.result' ? 'done' : ['ui.form','ui.choice'].includes(next.type) ? 'waiting' : 'ready';
@@ -109,7 +112,7 @@ export class Runner {
       command=$9,attempts=0,lease=NULL,uncertain=false,due=now()
       WHERE id=$1 AND actor=$2 AND step=$3 AND lease IS NOT DISTINCT FROM $4::uuid
       AND (NOT $10::boolean OR expires>clock_timestamp())`,
-      [run.id, run.actor, run.step, run.lease, dest, status, outputs, expires, randomUUID(), requireValidChoice]);
+      [run.id, run.actor, run.step, run.lease, dest, status, outputs, expires, keepCommand ? run.command : randomUUID(), requireValidChoice]);
     return changed.rowCount === 1;
   }
 
@@ -168,7 +171,9 @@ export class Runner {
   private async executeCall(run: Run, def: Definition, node: Extract<WorkflowNode, { type: 'service.call' }>) {
     const op = def.catalog.operations.get(node.operationId)!;
     const errorPort = (code: string) => node.on['error.' + code] ?? node.on.error!;
-    if (run.attempts > 3 || (!op.idempotent && run.attempts > 1)) {
+    const local = def.catalog.config.id === 'filmobot' && this.env.JARVIS_CINEMA_TRANSPORT === 'telegram';
+    const delivery = local && node.operationId === 'enqueueDownload';
+    if (!delivery && (run.attempts > 3 || (!op.idempotent && run.attempts > 1))) {
       await this.advance(run, def, errorPort(op.method === 'post' ? 'HANDOFF_UNCERTAIN' : 'ATTEMPTS_EXHAUSTED'));
       return;
     }
@@ -177,8 +182,15 @@ export class Runner {
     await this.pool.query('INSERT INTO jarvis_attempts(request,run,step,operation,attempt,command) VALUES($1,$2,$3,$4,$5,$6)',
       [request, run.id, run.step, node.operationId, run.attempts, run.command]);
     const config = def.catalog.config;
-    const response = await callService(op, args, run.actor, run.command, request,
-      this.env[config.baseUrlEnv], this.env[config.credential.tokenEnv]);
+    const response = delivery ? await this.cinema.deliver(run,args)
+      : local && node.operationId === 'searchReleases' ? await this.cinema.search(run.actor,args)
+      : await callService(op, args, run.actor, run.command, request, this.env[config.baseUrlEnv], this.env[config.credential.tokenEnv]);
+    if ('pending' in response) {
+      await this.pool.query("UPDATE jarvis_attempts SET finished=now(),outcome='AWAITING_FILMOBOT' WHERE request=$1",[request]);
+      await this.pool.query("UPDATE jarvis_runs SET lease=NULL,due=now()+interval '15 seconds' WHERE id=$1 AND lease=$2",[run.id,run.lease]);
+      await this.cinema.wake(run.command);
+      return;
+    }
     await this.pool.query('UPDATE jarvis_attempts SET finished=now(),outcome=$2 WHERE request=$1',
       [request, response.ok ? 'success' : response.code]);
     if (response.ok) {
@@ -188,8 +200,11 @@ export class Runner {
         uncertain=uncertain OR $4 WHERE id=$1 AND lease=$2`,
         [run.id, run.lease, Math.max(response.delay, run.attempts), response.ambiguous]);
     } else {
-      const uncertain = op.method === 'post' && (run.uncertain || response.ambiguous);
-      await this.advance(run, def, errorPort(uncertain ? 'HANDOFF_UNCERTAIN' : response.code));
+      const uncertain = delivery ? response.code==='HANDOFF_UNCERTAIN' : op.method === 'post' && (run.uncertain || response.ambiguous);
+      const dest = errorPort(uncertain ? 'HANDOFF_UNCERTAIN' : response.code);
+      const lateReceipt = delivery && uncertain && def.graph.nodes.get(dest)?.type === 'ui.result';
+      await this.advance(run, def, dest, undefined, false, lateReceipt);
+      if (lateReceipt) await this.cinema.wake(run.command);
     }
   }
 }

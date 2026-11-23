@@ -18,8 +18,9 @@ test('Mini App → runner → Filmobot → квитанция в мобильн�
   let logins=0;
   page.on('request',r=>{if(r.url().endsWith('/api/session')) logins++;});
   page.on('pageerror',err=>errors.push(err.message));
+  const launch = launchData();
   await page.route('https://telegram.org/js/telegram-web-app.js',route=>route.fulfill({
-    contentType:'text/javascript',body:'window.Telegram={WebApp:{initData:'+JSON.stringify(launchData())+',colorScheme:"dark",ready(){},expand(){},onEvent(){},offEvent(){}}};',
+    contentType:'text/javascript',body:'window.Telegram={WebApp:{initData:'+JSON.stringify(launch)+',colorScheme:"dark",ready(){},expand(){},onEvent(){},offEvent(){}}};',
   }));
   await page.goto(app);
   await page.getByRole('button',{name:'Найти фильм'}).click();

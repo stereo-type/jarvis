@@ -43,6 +43,18 @@ export async function migrate(pool: Pool) {
         finished timestamptz, outcome text
       );
       ALTER TABLE jarvis_attempts ADD COLUMN IF NOT EXISTS command uuid;
+      CREATE TABLE IF NOT EXISTS jarvis_cinema_searches (
+        id uuid PRIMARY KEY, actor text NOT NULL, expires timestamptz NOT NULL, releases jsonb NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS jarvis_cinema_search_expiry ON jarvis_cinema_searches(expires);
+      CREATE TABLE IF NOT EXISTS jarvis_cinema_deliveries (
+        command uuid PRIMARY KEY, run uuid NOT NULL REFERENCES jarvis_runs ON DELETE CASCADE,
+        step text NOT NULL, peer text NOT NULL, digest text NOT NULL, document bytea,
+        tries integer NOT NULL DEFAULT 0, next_send timestamptz NOT NULL DEFAULT now(),
+        deadline timestamptz NOT NULL DEFAULT now()+interval '5 minutes',
+        receipt text CHECK(receipt IN ('stored','uncertain','rejected')),
+        local_failure boolean NOT NULL DEFAULT false
+      );
     `);
     await client.query('COMMIT');
   } catch (error) {
