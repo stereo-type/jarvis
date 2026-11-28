@@ -32,10 +32,9 @@ function App() {
   const [error,setError] = useState('');
   const [run,setRun] = useState(null);
   const [recent,setRecent] = useState(null);
-  const [cinemaEnabled,setCinemaEnabled]=useState(null);
-  const [me,setMe]=useState(null);
-  const [meError,setMeError]=useState('');
-  const [accessCheck,setAccessCheck]=useState(0);
+  const [cinema,setCinema]=useState(null);
+  const cinemaEnabled=cinema?.enabled;
+  const [canEdit,setCanEdit]=useState(false);
   const [editing,setEditing]=useState(false);
   const [busy,setBusy] = useState(false);
   const [journal,setJournal] = useState(null);
@@ -81,21 +80,30 @@ function App() {
   useEffect(() => {
     if (!token || run) return;
     let live=true;
-    Promise.all([api('runs'),api('cinema')]).then(([rows,cinema])=>{
-      if(live){setRecent(rows);setCinemaEnabled(cinema.enabled);}
-    }).catch(e=>{if(live)setError(e.message);});
+    api('runs').then(rows=>{if(live)setRecent(rows);}).catch(e=>{if(live)setError(e.message);});
     return ()=>{live=false;};
   },[token,run?.id]);
   useEffect(()=>{
+    if(!token)return;
+    let live=true,timer;
+    async function check(){
+      let status;
+      try {status=await api('cinema');}
+      catch {status={enabled:false,canSend:false,message:'Не удалось узнать состояние кино. Повторяем проверку…'};}
+      if(!live)return;
+      setCinema(status);
+      if(!status.canSend)timer=setTimeout(check,15000);
+    }
+    check();
+    return ()=>{live=false;clearTimeout(timer);};
+  },[token]);
+  useEffect(()=>{
     if(!token || run || editing)return;
     let live=true;
-    setMe(null);setMeError('');
-    api('me').then(profile=>{
-      if(typeof profile.canEdit!=='boolean')throw new Error('В ответе отсутствует поле canEdit.');
-      if(live)setMe(profile);
-    }).catch(e=>{if(live)setMeError(e.message);});
+    api('me').then(profile=>{if(live)setCanEdit(profile.canEdit===true);})
+      .catch(()=>{if(live)setCanEdit(false);});
     return ()=>{live=false;};
-  },[token,run?.id,editing,accessCheck]);
+  },[token,run?.id,editing]);
   useEffect(() => {
     if (!run || run.status!=='ready') return;
     let live=true, timer;
@@ -160,21 +168,11 @@ function App() {
   else if(!token) content=h`<p role="status">Подключаемся к Telegram…</p>`;
   else if(editing) content=h`<${WorkflowEditor} api=${api} leave=${()=>setEditing(false)} telegram=${tg}/>`;
   else if(!run) content=h`<section className="feature">
-      <div className="feature-copy"><h1>Кино</h1><p>${cinemaEnabled===false?'Сервис поиска пока не подключён.':'Найти фильм и передать раздачу в uTorrent.'}</p>
+      <div className="feature-copy"><h1>Кино</h1><p>${!cinema?'Проверяем доступность поиска…':cinema.canSend?'Найти фильм и передать раздачу в uTorrent.':cinemaEnabled?'Поиск раздач по названию фильма.':'Поиск недоступен.'}</p>
       <button className="primary" disabled=${busy || !cinemaEnabled} onClick=${()=>open()}>Найти фильм</button></div>
       <img className="robot" src="/robot.jpg" alt="" /></section>
-    ${me?.canEdit && h`<button className="editor-entry" onClick=${()=>setEditing(true)}><span aria-hidden="true">⑂</span><strong>Редактор workflow</strong><b aria-hidden="true">→</b></button>`}
-    <section className="recent" aria-label="Доступ к редактору"><h2>Доступ к редактору</h2>
-      ${me ? h`<p>Telegram ID на сервере · <code>${me.telegramUserId ?? 'сервер не вернул ID'}</code><br/>
-        <code>/api/me</code> · <code>${'canEdit: '+me.canEdit}</code></p>
-        ${!me.canEdit && h`<p>${me.reason==='admins_not_configured'
-          ? 'Список администраторов JARVIS_ADMIN_USER_IDS на сервере пуст.'
-          : me.reason==='user_not_admin' ? 'Этого Telegram ID нет в серверном списке JARVIS_ADMIN_USER_IDS.'
-          : 'Сервер не предоставил доступ к редактору.'}</p>`}`
-        : meError ? h`<p role="alert">Не удалось проверить права через /api/me. ${meError}</p>`
-        : h`<p role="status">Проверяем права через /api/me…</p>`}
-      <button className="secondary" disabled=${!me && !meError} onClick=${()=>setAccessCheck(n=>n+1)}>Проверить снова</button>
-    </section>
+    ${cinema?.message && h`<p className="cinema-status" role="status">${cinema.message}</p>`}
+    ${canEdit && h`<button className="editor-entry" onClick=${()=>setEditing(true)}><span aria-hidden="true">⑂</span><strong>Редактор workflow</strong><b aria-hidden="true">→</b></button>`}
     <section className="recent"><h2>Последние запуски</h2>
     ${recent===null ? h`<p role="status">Загружаем историю…</p>` : !recent.length ? h`<p>Здесь появятся ваши поиски и квитанции.</p>` : recent.map(r=>h`
       <button key=${r.id} disabled=${busy} className="row" onClick=${()=>open(r.id)}>
@@ -182,8 +180,8 @@ function App() {
         <span className="tag">${labels[r.step] ?? 'В работе'}</span></button>`)}</section>`;
   else if(run.fields) content=h`<${WorkflowForm} key=${run.id+':'+run.step} run=${run} busy=${busy} enabled=${cinemaEnabled} submit=${data=>act('submit',data)}/>`;
   else if(run.choices) content=h`<section className="panel"><h1>${run.title}</h1>
-    <p>${expired?'Время выбора истекло. Обновляем статус…':'Выбранный файл .torrent будет передан в uTorrent.'}</p>
-    ${run.choices.map(c=>h`<button key=${c.value} className="row" disabled=${busy || expired || !cinemaEnabled} onClick=${()=>act('select',{value:c.value})}>
+    <p>${expired?'Время выбора истекло. Обновляем статус…':cinema?.message ?? 'Выбранный файл .torrent будет передан в uTorrent.'}</p>
+    ${run.choices.map(c=>h`<button key=${c.value} className="row" disabled=${busy || expired || !cinema?.canSend} onClick=${()=>act('select',{value:c.value})}>
       <span><strong>${c.label}</strong><small>${Object.entries(c.details).map(([k,v])=>k==='size'?v:k==='seeds'?'Сиды '+v:k+' '+v).join(' · ')}</small></span><span aria-hidden="true">→</span></button>`)}
     ${button('Отменить выбор',()=>act('cancel'),true)}</section>`;
   else if(run.status==='done') content=h`<section className="panel result">

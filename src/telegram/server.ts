@@ -5,7 +5,7 @@ import { InvalidAction, Runner, RunNotFound } from '../runner/engine.ts';
 import { HttpError, telegramAuth } from './auth.ts';
 import type { WorkflowEditor } from '../editor.ts';
 import type { QueueJobs } from '../n8n/jobs.ts';
-import { checkSecret, receiptPath } from '../cinema/webhook.ts';
+import { checkSecret, receiptPath, type CinemaStatus } from '../cinema/webhook.ts';
 
 const cinema = 'cinema.search-and-download';
 const assets = new Map<string, [string, string]>([
@@ -36,8 +36,7 @@ function json(res: ServerResponse, status: number, data: unknown) {
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8'}).end(JSON.stringify(data));
 }
 
-export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAuth>, healthy: () => Promise<unknown>, cinemaEnabled: boolean | (()=>boolean), editor: WorkflowEditor, admins: ReadonlySet<string>, jobs:QueueJobs, receiptSecret = '') {
-  const cinemaReady = () => typeof cinemaEnabled==='function' ? cinemaEnabled() : cinemaEnabled;
+export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAuth>, healthy: () => Promise<unknown>, cinemaStatus: ()=>CinemaStatus, editor: WorkflowEditor, admins: ReadonlySet<string>, jobs:QueueJobs, receiptSecret = '') {
   const action = z.object({ step:z.string().max(100), event:z.enum(['submit','select','cancel']), data:z.record(z.unknown()).default({}) }).strict();
   return createServer(async (req,res) => {
     res.setHeader('Cache-Control','no-store');
@@ -93,11 +92,12 @@ export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAu
         }
         throw new HttpError(404,'Маршрут редактора не найден.');
       }
-      if (path === '/api/cinema' && req.method === 'GET') return json(res,200,{enabled:cinemaReady()});
+      if (path === '/api/cinema' && req.method === 'GET') return json(res,200,cinemaStatus());
       if (path === '/api/runs') {
         if (req.method === 'GET') return json(res,200,await runner.recent(actor,cinema));
         if (req.method === 'POST') {
-          if (!cinemaReady()) throw new HttpError(503,'Сервис поиска пока не подключён.');
+          const status=cinemaStatus();
+          if (!status.enabled) throw new HttpError(503,status.message ?? 'Поиск выключен.');
           z.object({}).strict().parse(await body(req));
           const id = await runner.start(cinema,actor);
           return json(res,201,await runner.view(id,actor));
@@ -110,7 +110,9 @@ export function miniAppServer(runner: Runner, auth: ReturnType<typeof telegramAu
         if (route[2] === '/history' && req.method === 'GET') return json(res,200,await runner.history(id,actor));
         if (route[2] === '/actions' && req.method === 'POST') {
           const input = action.parse(await body(req));
-          if (!cinemaReady() && input.event !== 'cancel') throw new HttpError(503,'Сервис поиска пока не подключён.');
+          const status=cinemaStatus();
+          if (input.event!=='cancel' && (!status.enabled || input.event==='select' && !status.canSend))
+            throw new HttpError(503,status.message ?? 'Передача в Filmobot недоступна.');
           await runner.act(id,actor,input.step,input.event,input.data);
           return json(res,200,await runner.view(id,actor));
         }

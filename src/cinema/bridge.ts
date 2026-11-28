@@ -46,6 +46,7 @@ export class CinemaBridge {
       'SELECT peer,receipt,local_failure,deadline<=now() AS expired FROM jarvis_cinema_deliveries WHERE command=$1',[command])).rows[0];
     let delivery = await state();
     if (!delivery) {
+      if (this.env.JARVIS_CINEMA_ENABLED!=='true') return failure('HANDOFF_DISABLED');
       const snapshot = await this.pool.query<{releases:Release[]}>(
         'SELECT releases FROM jarvis_cinema_searches WHERE id=$1 AND actor=$2 AND expires>now()',[args.searchId,run.actor]);
       if (!snapshot.rowCount) return failure('SELECTION_EXPIRED');
@@ -59,7 +60,7 @@ export class CinemaBridge {
         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(command) DO NOTHING`,[command,run.id,run.step,peer,digest,file]);
       delivery = (await state())!;
     }
-    if (!delivery.receipt && !delivery.expired && !delivery.local_failure && delivery.peer===peer) {
+    if (this.env.JARVIS_CINEMA_ENABLED==='true' && !delivery.receipt && !delivery.expired && !delivery.local_failure && delivery.peer===peer) {
       // Reserve the attempt before network I/O. A dead worker may already have sent these exact bytes.
       const {rows} = await this.pool.query<{digest:string;document:Buffer;tries:number}>(`UPDATE jarvis_cinema_deliveries
         SET tries=tries+1,next_send=now()+interval '60 seconds' WHERE command=$1 AND receipt IS NULL

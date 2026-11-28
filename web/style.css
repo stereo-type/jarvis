@@ -1,4 +1,5 @@
 *{box-sizing:border-box}
+.cinema-status{margin:12px 0;overflow-wrap:anywhere}
 :root{color-scheme:dark;--bg:#0d191b;--card:#142629;--ink:#f1f5ee;--muted:#a4bab7;--line:#34494b;--accent:#a8e8d2;font:16px/1.5 Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
 :root[data-theme=light]{color-scheme:light;--bg:#f2f5f1;--card:#fff;--ink:#142a28;--muted:#4e6761;--line:#c9d6cf;--accent:#9cdec4}
 body{margin:0}main{max-width:750px;margin:auto;padding: max(18px,env(safe-area-inset-top)) 18px max(28px,env(safe-area-inset-bottom))}

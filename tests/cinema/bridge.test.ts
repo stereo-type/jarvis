@@ -47,12 +47,13 @@ test('Mini App → RuTor → Telegram document → Filmobot watch folder → aut
       return Response.json({ok:true,result:{message_id:71,chat:{type:'private',id:Number(form.get('chat_id'))},caption,document:{file_id:'doc'}}});
     })
   };
-  const env={JARVIS_CINEMA_TRANSPORT:'telegram',JARVIS_BOT_TOKEN:token,JARVIS_FILMOBOT_ID:'2000'};
+  const env={JARVIS_CINEMA_ENABLED:'true',JARVIS_CINEMA_TRANSPORT:'telegram',JARVIS_BOT_TOKEN:token,JARVIS_FILMOBOT_ID:'2000'};
   const fresh=()=>new Runner(pool,env,new CinemaBridge(pool,env,adapters));
   let runner=fresh();
   await runner.publish('examples/services/filmobot.connection.json','examples/workflows/cinema-search.json');
   const auth=telegramAuth(token,'42');
-  const server=miniAppServer(runner,auth,async()=>{},true,new WorkflowEditor(pool),new Set(),new QueueJobs(pool,false),secret);
+  let canSend=false;
+  const server=miniAppServer(runner,auth,async()=>{},()=>({enabled:true,canSend}),new WorkflowEditor(pool),new Set(),new QueueJobs(pool,false),secret);
   server.listen(0,'127.0.0.1');await once(server,'listening');
   t.after(()=>new Promise<void>(resolve=>server.close(()=>resolve())));
   const base='http://127.0.0.1:'+(server.address() as AddressInfo).port;
@@ -74,6 +75,10 @@ test('Mini App → RuTor → Telegram document → Filmobot watch folder → aut
   assert.equal(choice.choices[0].value,'rutor:7');
   runner=fresh();
   const select=()=>api(path+'/actions',{step:'choose',event:'select',data:{value:'rutor:7'}});
+  await assert.rejects(select(),/503/);
+  assert.equal((await api(path)).step,'choose');
+  assert.equal(downloads,0);
+  canSend=true;
   await Promise.all([select(),select()]);
   await runner.tick();
   assert.equal(replies.length,1);

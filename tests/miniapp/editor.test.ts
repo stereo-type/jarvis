@@ -24,7 +24,9 @@ test('редактор на мобильном экране сохраняет �
   assert.equal((await fetch(app+'/api/me')).status,401);
   assert.deepEqual(await (await request('/api/me',member)).json(),{telegramUserId:'43',canEdit:false,reason:'user_not_admin'});
   assert.deepEqual(await (await request('/api/me',owner)).json(),{telegramUserId:'42',canEdit:true});
-  assert.deepEqual(await (await request('/api/cinema',owner)).json(),{enabled:false});
+  const cinema=await (await request('/api/cinema',owner)).json();
+  assert.equal(cinema.enabled,true);
+  assert.equal(cinema.canSend,false);
   const db=new Pool();t.after(()=>db.end());
   const runner=new Runner(db);
   const oldRun=await runner.start(workflow,'42');
@@ -38,9 +40,8 @@ test('редактор на мобильном экране сохраняет �
   await page.route('https://telegram.org/js/telegram-web-app.js',route=>route.fulfill({contentType:'text/javascript',
     body:'window.Telegram={WebApp:{initData:'+JSON.stringify(launchData())+',ready(){},expand(){},onEvent(){},offEvent(){}}};'}));
   await page.goto(app);
-  const access=page.getByRole('region',{name:'Доступ к редактору'});
-  await access.getByText('42',{exact:true}).waitFor();
-  await access.getByText('canEdit: true',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Редактор workflow'}).waitFor();
+  assert.equal(await page.getByText(/Доступ к редактору|canEdit:|Telegram ID на сервере/).count(),0);
   const open=()=>page.getByRole('button',{name:'Редактор workflow'}).click();
   await open();
   const query=page.locator('[data-node="query"]');
@@ -108,20 +109,18 @@ test('редактор на мобильном экране сохраняет �
   assert.deepEqual(concurrent.map(r=>r.status).sort(),[200,409]);assert.equal((await read()).revision,4);
 });
 
-test('участник видит ответ сервера и может повторить проверку после ошибки', async t=>{
+test('сбой истории не блокирует поиск, диагностика прав скрыта от участника', async t=>{
   const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox','--disable-dev-shm-usage']});
   t.after(()=>browser.close());
   const page=await browser.newPage({viewport:{width:390,height:830}});
   await page.route('https://telegram.org/js/telegram-web-app.js',route=>route.fulfill({contentType:'text/javascript',
     body:'window.Telegram={WebApp:{initData:'+JSON.stringify(launchData(43))+',ready(){},expand(){},onEvent(){},offEvent(){}}};'}));
-  await page.route('**/api/runs',route=>route.fulfill({status:503,json:{error:'История недоступна'}}));
-  await page.route('**/api/me',route=>route.fulfill({status:502,body:'Bad Gateway'}),{times:1});
+  await page.route('**/api/runs',route=>route.request().method()==='GET'
+    ? route.fulfill({status:503,json:{error:'История недоступна'}}) : route.continue());
   await page.goto('http://app:8080');
-  const access=page.getByRole('region',{name:'Доступ к редактору'});
-  await access.getByRole('alert').filter({hasText:'HTTP 502'}).waitFor();
-  await access.getByRole('button',{name:'Проверить снова'}).click();
-  await access.getByText('43',{exact:true}).waitFor();
-  await access.getByText('canEdit: false',{exact:true}).waitFor();
-  await access.getByText(/Этого Telegram ID нет/).waitFor();
+  await page.getByText(/История недоступна/).waitFor();
+  assert.equal(await page.getByText(/Доступ к редактору|canEdit:|Telegram ID на сервере/).count(),0);
   assert.equal(await page.getByRole('button',{name:'Редактор workflow'}).count(),0);
+  await page.getByRole('button',{name:'Найти фильм'}).click();
+  await page.locator('form input').first().waitFor();
 });

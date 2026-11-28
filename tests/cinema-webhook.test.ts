@@ -1,8 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { registerCinemaWebhook } from '../src/cinema/webhook.ts';
+import { initialCinemaStatus, registerCinemaWebhook } from '../src/cinema/webhook.ts';
 
 const env={JARVIS_PUBLIC_URL:'https://jarvis.example/',JARVIS_BOT_TOKEN:'1000:example',JARVIS_FILMOBOT_ID:'2000',JARVIS_CINEMA_WEBHOOK_SECRET:'0123456789abcdef'};
+
+test('поиск доступен до подключения Filmobot и учитывает явное отключение',()=>{
+  for(const mode of [undefined,'search','true']){
+    const state=initialCinemaStatus(mode,true);
+    assert.equal(state.enabled,true);
+    assert.equal(state.canSend,false);
+  }
+  assert.equal(initialCinemaStatus('false',true).enabled,false);
+  assert.equal(initialCinemaStatus('typo',true).enabled,false);
+});
 
 test('webhook registration preserves other webhook consumers and queued updates',async()=>{
   for(const url of ['','https://jarvis.example/telegram/cinema/receipt','https://elsewhere.example/bot']){
