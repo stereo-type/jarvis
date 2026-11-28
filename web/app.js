@@ -6,6 +6,23 @@ const tg = window.Telegram?.WebApp;
 const launch = 'https://t.me/assitant_ai_bot/JarvisApp';
 const labels = {query:'Ожидает запроса',search:'Идёт поиск',found:'Идёт поиск',choose:'Выбор раздачи',enqueue:'Передаётся',submitted:'Передано',empty:'Ничего не найдено',cancelled:'Отменено',expired:'Выбор истёк',uncertain:'Требует сверки',failure:'Ошибка'};
 
+const trackerIssues = {
+  SEARCH_UNAVAILABLE:'Поиск не выполнен. В этом запуске причина не записана.',
+  RUTOR_DNS:'DNS сервера не смог определить адрес RuTor.',
+  RUTOR_TIMEOUT:'RuTor не ответил вовремя.',
+  RUTOR_NETWORK:'Сервер Jarvis не смог получить ответ от RuTor.',
+  RUTOR_RESPONSE:'RuTor вернул страницу, которую Jarvis не смог прочитать.',
+  RUTOR_TLS:'Не удалось установить защищённое соединение с RuTor.',
+  RUTOR_REDIRECT:'RuTor перенаправил запрос на неподдерживаемый адрес.'
+};
+function outcomeText(code) {
+  if (!code) return 'Ответ не получен';
+  if (code==='success') return 'Успешно';
+  if (Object.hasOwn(trackerIssues,code)) return trackerIssues[code];
+  const status=/^RUTOR_HTTP_(\d{3})$/.exec(code);
+  return status ? 'RuTor вернул HTTP '+status[1] : code;
+}
+
 function WorkflowForm({run, busy, enabled, submit}) {
   const [values,setValues]=useState({});
   function value(field) {
@@ -189,7 +206,7 @@ function App() {
     <h1>${run.title}</h1>${run.receipt && h`<p>Квитанция</p><code data-testid="receipt">${run.receipt}</code>`}
     <div className="actions">${cinemaEnabled && button('Новый поиск',()=>open())}
     ${button('Журнал запуска',()=>doAction(async()=>setJournal(await api('runs/'+run.id+'/history'))),true)}</div>
-    ${journal && h`<ul>${journal.map(j=>h`<li key=${j.request}>${j.operation} · ${j.outcome==='success'?'Успешно':j.outcome ?? 'Ответ не получен'}</li>`)}</ul>`}</section>`;
+    ${journal && h`<ul>${journal.map(j=>h`<li key=${j.request}>${j.operation==='searchReleases'?'Поиск раздач':j.operation} · ${outcomeText(j.outcome)}</li>`)}</ul>`}</section>`;
   else content=h`<section className="panel" role="status"><h1>${run.step==='enqueue'?'Передаём раздачу…':'Ищем раздачи…'}</h1><progress />
     ${slow && h`<p>Обработка занимает больше времени. Результат можно открыть позже в истории.</p>`}</section>`;
   return h`<main className=${editing?'editor-main':''}><header><span className="brand"><i aria-hidden="true"></i>Jarvis</span>

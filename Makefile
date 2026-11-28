@@ -50,6 +50,11 @@ test-editor: dev-image
 
 include Makefile.n8n
 
+# Read-only live check with the same Node runtime and RuTor adapter as the worker.
+.PHONY: check-cinema-search
+check-cinema-search: dev-image
+	docker run --rm $(DEV_IMAGE) node --input-type=module -e "import {searchReleases} from './src/cinema/rutor.ts'; const rows=await searchReleases('Nosferatu', 1); if (!rows.length) throw new Error('Контрольный поиск вернул пустой список'); console.log('RuTor: получена и разобрана раздача', rows[0].releaseId)"
+
 .PHONY: test-cinema-telegram
 test-cinema-telegram: dev-image
 	@set -eu; project="jarvis-cinema-$$$$"; \

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import { downloadTorrent, searchReleases, type Release } from './rutor.ts';
+import { downloadTorrent, searchReleases, TrackerError, type Release } from './rutor.ts';
 import { parseTorrentReceipt, sendTorrentDocument, TelegramDeliveryError } from './telegram.ts';
 import type { CallResult } from '../runner/service-call.ts';
 
@@ -27,7 +27,10 @@ export class CinemaBridge {
         typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 5) return failure('INVALID_INPUT');
     let releases: Release[];
     try { releases = await this.io.search(args.query,limit); }
-    catch { return failure('SEARCH_UNAVAILABLE',true); }
+    catch (error) {
+      if (error instanceof TrackerError) return failure(error.code,error.retryable);
+      return failure('SEARCH_UNAVAILABLE',true);
+    }
     const searchId = randomUUID();
     await this.pool.query('DELETE FROM jarvis_cinema_searches WHERE expires<=now()');
     const {rows} = await this.pool.query<{expires:Date}>(`INSERT INTO jarvis_cinema_searches(id,actor,expires,releases)

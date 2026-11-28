@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { downloadTorrent, searchReleases } from "../src/cinema/rutor.ts";
+import { downloadTorrent, searchReleases, TrackerError } from "../src/cinema/rutor.ts";
+import { trackerAddresses } from "../src/cinema/tracker-fetch.ts";
 
 // Keep the original key order and non-UTF-8 piece hashes to catch hashing a re-encoded dictionary.
 const info = Buffer.concat([
@@ -47,6 +48,33 @@ test("RuTor retries a connection failure on the search mirror", async () => {
     return new Response('<table id="index">' + row(7) + "</table>");
   });
   assert.deepEqual(hosts, ["rutor.is", "rutor.info"]);
+});
+
+test("tracker lookup uses a DNS A answer when the container system lookup fails", async () => {
+  const missing=Object.assign(new Error('lookup failed'),{code:'ENOTFOUND'});
+  const dns={
+    lookup:async()=>{throw missing;},
+    resolve4:async()=>['192.0.2.1'],
+    resolve6:async()=>{throw missing;}
+  };
+  assert.deepEqual(await trackerAddresses('rutor.is',0,dns),[{address:'192.0.2.1',family:4}]);
+  await assert.rejects(trackerAddresses('rutor.is',6,dns),missing);
+  const local=[{address:'192.0.2.2',family:4}];
+  assert.deepEqual(await trackerAddresses('rutor.is',0,{...dns,lookup:async()=>local}),local);
+});
+
+test("both tracker pages are parsed before reporting a search failure",async()=>{
+  let count=0;
+  const releases=await searchReleases("Кино",1,async()=>new Response(++count===1?'<html/>':'<div id="index"><table>'+row(12)+'</table></div>'));
+  assert.equal(releases[0]?.releaseId,'rutor:12');
+  for(const [fetcher,code,retryable] of [
+    [async()=>new Response(null,{status:403}),'RUTOR_HTTP_403',false],
+    [async()=>{throw new TypeError('fetch failed',{cause:{code:'ENOTFOUND'}});},'RUTOR_DNS',true],
+    [async()=>{throw new DOMException('timeout','TimeoutError');},'RUTOR_TIMEOUT',true],
+    [async()=>new Response('<title>Unavailable</title>'),'RUTOR_RESPONSE',false]
+  ] as const) {
+    await assert.rejects(searchReleases('Кино',1,fetcher),error=>error instanceof TrackerError && error.code===code && error.retryable===retryable);
+  }
 });
 
 test("RuTor downloads the selected release and hashes its original binary info dictionary", async () => {

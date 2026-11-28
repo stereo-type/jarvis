@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { load } from "cheerio/slim";
+import { fetchTracker } from "./tracker-fetch.ts";
 
 export interface Release {
   releaseId: string;
@@ -15,18 +16,39 @@ const downloadOrigins = ["https://d.rutor.info", "https://d.rutor.is"] as const;
 const maxTorrentBytes = 16 * 1024 * 1024;
 const maxSearchBytes = 2 * 1024 * 1024;
 
+export class TrackerError extends Error {
+  readonly code: string;
+  readonly retryable: boolean;
+  constructor(code: string, message: string, retryable = false) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+function trackerError(error: unknown): TrackerError {
+  if (error instanceof TrackerError) return error;
+  const cause = error instanceof Error ? error.cause as NodeJS.ErrnoException | undefined : undefined;
+  const code = cause?.code ?? '';
+  if (['ENOTFOUND','EAI_AGAIN'].includes(code)) return new TrackerError('RUTOR_DNS','DNS не вернул адрес RuTor.',true);
+  if (error instanceof Error && error.name==='TimeoutError' || ['UND_ERR_CONNECT_TIMEOUT','ETIMEDOUT'].includes(code))
+    return new TrackerError('RUTOR_TIMEOUT','Истекло время ожидания ответа RuTor.',true);
+  if (/CERT|TLS|SSL/.test(code)) return new TrackerError('RUTOR_TLS','Ошибка защищённого соединения с RuTor.');
+  return new TrackerError('RUTOR_NETWORK','Не удалось получить ответ от RuTor.',true);
+}
+
 async function readLimited(response: Response, limit: number): Promise<Buffer> {
-  if (!response.body) throw new Error("Пустой ответ RuTor.");
+  if (!response.body) throw new TrackerError('RUTOR_RESPONSE',"Пустой ответ RuTor.");
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let length = 0;
   try {
-    if (Number(response.headers.get("content-length")) > limit) throw new Error("Ответ RuTor превышает допустимый размер.");
+    if (Number(response.headers.get("content-length")) > limit) throw new TrackerError('RUTOR_RESPONSE',"Ответ RuTor превышает допустимый размер.");
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
       length += chunk.value.byteLength;
-      if (length > limit) throw new Error("Ответ RuTor превышает допустимый размер.");
+      if (length > limit) throw new TrackerError('RUTOR_RESPONSE',"Ответ RuTor превышает допустимый размер.");
       chunks.push(chunk.value);
     }
     return Buffer.concat(chunks, length);
@@ -40,22 +62,16 @@ async function readLimited(response: Response, limit: number): Promise<Buffer> {
 
 async function getBytes(url: URL, origins: readonly string[], limit: number, signal: AbortSignal, fetcher: typeof fetch): Promise<Buffer> {
   for (let redirects = 0; redirects <= 3; redirects++) {
-    if (!origins.includes(url.origin) || url.username || url.password) throw new Error("Неизвестный адрес перенаправления RuTor.");
+    if (!origins.includes(url.origin) || url.username || url.password) throw new TrackerError('RUTOR_REDIRECT',"Неизвестный адрес перенаправления RuTor.");
     const response = await fetcher(url, { redirect: "manual", signal });
     if (response.status === 200) return readLimited(response, limit);
     await response.body?.cancel();
     const location = response.headers.get("location");
-    if (![301, 302, 303, 307, 308].includes(response.status) || !location) throw new Error("Ошибка HTTP RuTor " + response.status);
+    if (![301, 302, 303, 307, 308].includes(response.status) || !location)
+      throw new TrackerError('RUTOR_HTTP_'+response.status,"Ошибка HTTP RuTor " + response.status,response.status>=500 || response.status===408);
     url = new URL(location, url);
   }
-  throw new Error("Слишком много перенаправлений RuTor.");
-}
-
-function isConnectionError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const cause = error.cause;
-  return typeof cause === "object" && cause !== null && "code" in cause &&
-    ["ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT"].includes(String(cause.code));
+  throw new TrackerError('RUTOR_REDIRECT',"Слишком много перенаправлений RuTor.");
 }
 
 function peerCount(value: string): number | undefined {
@@ -84,23 +100,21 @@ function parseResults(html: Buffer, limit: number): Release[] {
     if (results.length === limit) break;
   }
   if (results.length || (table.length && /Результатов поиска\s+0\b/i.test($.root().text()))) return results;
-  throw new Error("Не удалось прочитать страницу результатов RuTor.");
+  throw new TrackerError('RUTOR_RESPONSE',"Не удалось прочитать страницу результатов RuTor.");
 }
 
-export async function searchReleases(query: string, limit: number, fetcher: typeof fetch = fetch): Promise<Release[]> {
+export async function searchReleases(query: string, limit: number, fetcher: typeof fetch = fetchTracker): Promise<Release[]> {
   const term = query.trim();
   if (!term || term.length > 200 || !Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error("Некорректные параметры поиска.");
   // A segment of only one or two dots would be normalized by URL before sending.
   const path = "/search/0/0/100/2/" + encodeURIComponent(/^\.{1,2}$/.test(term) ? term + " " : term) + "/";
   const request = (origin: string) => getBytes(new URL(path, origin), searchOrigins, maxSearchBytes, AbortSignal.timeout(20_000), fetcher);
-  let html: Buffer;
-  try {
-    html = await request(searchOrigins[0]);
-  } catch (error) {
-    if (!isConnectionError(error)) throw error;
-    html = await request(searchOrigins[1]);
+  let lastError: TrackerError | undefined;
+  for (const origin of searchOrigins) {
+    try { return parseResults(await request(origin),limit); }
+    catch (error) { lastError=trackerError(error); }
   }
-  return parseResults(html, limit);
+  throw lastError;
 }
 
 function invalidMetadata(): never {
@@ -183,7 +197,7 @@ function torrentInfo(data: Buffer): Buffer {
   return info;
 }
 
-export async function downloadTorrent(releaseId: string, infoHash: string, fetcher: typeof fetch = fetch): Promise<Buffer> {
+export async function downloadTorrent(releaseId: string, infoHash: string, fetcher: typeof fetch = fetchTracker): Promise<Buffer> {
   if (!/^rutor:\d+$/.test(releaseId) || !/^[a-f0-9]{40}$/i.test(infoHash)) throw new Error("Некорректный идентификатор раздачи.");
   const url = new URL("/download/" + releaseId.slice(6), downloadOrigins[0]);
   const data = await getBytes(url, downloadOrigins, maxTorrentBytes, AbortSignal.timeout(30_000), fetcher);
